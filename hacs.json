@@ -1,0 +1,7 @@
+{
+  "name": "SteelSeries Gauge Card",
+  "description": "Animierte SteelSeries-Gauges (Radial, Linear, Bargraph) als Lovelace Custom Card.",
+  "content_in_root": false,
+  "filename": "steelseries-gauge-card.js",
+  "render_readme": true
+}
