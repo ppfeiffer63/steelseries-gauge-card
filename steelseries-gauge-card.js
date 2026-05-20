@@ -159,6 +159,7 @@ class SteelSeriesGaugeCard extends HTMLElement {
       thresholdVisible: this._config.threshold !== null,
       threshold:        this._config.threshold !== null ? this._config.threshold : this._config.max,
       section:          mkSections(this._config.sections),
+      useSectionColors: this._config.sections.length > 0,
       area:             mkSections(this._config.areas),
       frameDesign:      safeKey(ss.FrameDesign,     this._config.frame_design,     ss.FrameDesign?.METAL),
       backgroundColor:  safeKey(ss.BackgroundColor, this._config.background_color, ss.BackgroundColor?.DARK_GRAY),
