@@ -1,6 +1,6 @@
 {
   "name": "SteelSeries Gauge Card Installer",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "slug": "steelseries_gauge_installer",
   "description": "Installiert die SteelSeries Gauge Custom Card automatisch in Home Assistant.",
   "url": "https://github.com/ppfeiffer/steelseries-gauge-addon",
