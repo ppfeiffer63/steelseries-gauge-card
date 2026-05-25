@@ -1,23 +1,10 @@
 /**
- * SteelSeries Gauge Card for Home Assistant Lovelace  v2.0.0
+ * SteelSeries Gauge Card for Home Assistant Lovelace  v2.1.0
  *
- * Neue Optionen gegenüber v1:
- *   - width / height unabhängig
- *   - gauge_type: radial | radial_bargraph | linear | linear_bargraph
- *   - pointer_type: TYPE1 | TYPE2 | TYPE8
- *   - knob_type / knob_style
- *   - foreground_type
- *   - background_color: alle BackgroundColor-Werte
- *   - frame_design: alle FrameDesign-Werte
- *   - lcd_color: alle LcdColor-Werte
- *   - value_color (für Linear/LinearBargraph)
- *   - led_color: alle LedColor-Werte
- *   - title / unit als Gauge-Beschriftung
- *   - min_measured_value_visible / max_measured_value_visible
- *   - digital_font
- *   - threshold_rising
- *   - animation_speed (fullScaleDeflectionTime)
- *   - sections mit useSectionColors
+ * Neu in v2.1:
+ *   - gauge_type: clock (Uhr mit automatischer Zeitanzeige, Timezone-Offset)
+ *   - pointer_type: TYPE1–TYPE9 (alle verfügbaren Zeiger-Typen)
+ *   - Offline-Modus: steelseries.min.js in dist/ gebündelt (kein CDN nötig)
  */
 
 const _SS_URL = "https://cdn.jsdelivr.net/npm/steelseries@0.15.0/dist/steelseries.min.js";
@@ -60,51 +47,43 @@ class SteelSeriesGaugeCard extends HTMLElement {
     if (!config.entity) throw new Error("[SteelSeriesGaugeCard] 'entity' ist erforderlich.");
     const old = JSON.stringify(this._config);
     this._config = {
-      // Basis
-      entity:                   config.entity,
-      attribute:                config.attribute                || null,
-      title:                    config.title                    || "",
-      gauge_type:               (config.gauge_type             || "radial").toLowerCase(),
-      min:                      config.min                      !== undefined ? Number(config.min) : 0,
-      max:                      config.max                      !== undefined ? Number(config.max) : 100,
-      unit:                     config.unit                     || "",
-      // Größe
-      width:                    Number(config.width  || config.size) || 220,
-      height:                   Number(config.height || config.size) || 220,
-      // Schwellwert
-      threshold:                config.threshold               != null ? Number(config.threshold) : null,
-      threshold_rising:         config.threshold_rising        !== false,
-      // Anzeige
-      show_lcd:                 config.show_lcd                !== false,
-      lcd_decimals:             config.lcd_decimals            !== undefined ? Number(config.lcd_decimals) : 1,
-      digital_font:             config.digital_font            === true,
-      min_measured_visible:     config.min_measured_visible    === true,
-      max_measured_visible:     config.max_measured_visible    === true,
-      // Animationsgeschwindigkeit (Sekunden für Vollausschlag)
-      animation_speed:          config.animation_speed         !== undefined ? Number(config.animation_speed) : 2.5,
-      // Sections
-      sections:                 Array.isArray(config.sections) ? config.sections : [],
-      // Aussehen
-      frame_design:             config.frame_design            || "METAL",
-      background_color:         config.background_color        || "DARK_GRAY",
-      foreground_type:          config.foreground_type         || "TYPE1",
-      pointer_type:             config.pointer_type            || "TYPE1",
-      pointer_color:            config.pointer_color           || "RED",
-      value_color:              config.value_color             || "RED",
-      knob_type:                config.knob_type               || "STANDARD_KNOB",
-      knob_style:               config.knob_style              || "SILVER",
-      led_color:                config.led_color               || "RED_LED",
-      lcd_color:                config.lcd_color               || "STANDARD",
+      entity:               config.entity,
+      attribute:            config.attribute             || null,
+      title:                config.title                 || "",
+      gauge_type:           (config.gauge_type          || "radial").toLowerCase(),
+      min:                  config.min                   !== undefined ? Number(config.min) : 0,
+      max:                  config.max                   !== undefined ? Number(config.max) : 100,
+      unit:                 config.unit                  || "",
+      width:                Number(config.width  || config.size) || 220,
+      height:               Number(config.height || config.size) || 220,
+      threshold:            config.threshold             != null ? Number(config.threshold) : null,
+      threshold_rising:     config.threshold_rising      !== false,
+      show_lcd:             config.show_lcd              !== false,
+      lcd_decimals:         config.lcd_decimals          !== undefined ? Number(config.lcd_decimals) : 1,
+      digital_font:         config.digital_font          === true,
+      min_measured_visible: config.min_measured_visible  === true,
+      max_measured_visible: config.max_measured_visible  === true,
+      animation_speed:      config.animation_speed       !== undefined ? Number(config.animation_speed) : 2.5,
+      sections:             Array.isArray(config.sections) ? config.sections : [],
+      frame_design:         config.frame_design          || "METAL",
+      background_color:     config.background_color      || "DARK_GRAY",
+      foreground_type:      config.foreground_type       || "TYPE1",
+      pointer_type:         config.pointer_type          || "TYPE1",
+      pointer_color:        config.pointer_color         || "RED",
+      value_color:          config.value_color           || "RED",
+      knob_type:            config.knob_type             || "STANDARD_KNOB",
+      knob_style:           config.knob_style            || "SILVER",
+      led_color:            config.led_color             || "RED_LED",
+      lcd_color:            config.lcd_color             || "STANDARD",
+      timezone_offset:      config.timezone_offset       !== undefined ? Number(config.timezone_offset) : 0,
     };
     if (this._initialized && old !== JSON.stringify(this._config)) {
       const oldParsed = JSON.parse(old);
-      // Min/Max-Historie nur bei Entitätswechsel zurücksetzen
       if (oldParsed.entity !== this._config.entity || oldParsed.attribute !== this._config.attribute) {
         this._minMeasured = null;
         this._maxMeasured = null;
         this._latestValue = null;
       } else if (this._gauge) {
-        // Aktuelle Messwerte aus der Library sichern bevor der Gauge zerstört wird
         try {
           this._minMeasured = this._gauge.getMinMeasuredValue?.() ?? this._minMeasured;
           this._maxMeasured = this._gauge.getMaxMeasuredValue?.() ?? this._maxMeasured;
@@ -120,6 +99,12 @@ class SteelSeriesGaugeCard extends HTMLElement {
     this._hass = hass;
     const stateObj = hass.states[this._config.entity];
     if (!stateObj) return;
+
+    if (this._config.gauge_type === "clock") {
+      if (!this._initialized) this._build(null);
+      return;
+    }
+
     const raw = this._config.attribute
       ? stateObj.attributes[this._config.attribute]
       : stateObj.state;
@@ -169,55 +154,62 @@ class SteelSeriesGaugeCard extends HTMLElement {
         ? list.map(s => ss.Section(s.start, s.stop, s.color || "rgba(0,200,0,0.3)"))
         : [];
 
-    const hasSections = this._config.sections.length > 0;
-    const isLinear    = this._config.gauge_type === "linear" || this._config.gauge_type === "linear_bargraph";
-
-    const params = {
-      // Skalierung
-      minValue:                 this._config.min,
-      maxValue:                 this._config.max,
-      titleString:              this._config.title,
-      unitString:               this._config.unit,
-      // LCD
-      lcdVisible:               this._config.show_lcd,
-      lcdDecimals:              this._config.lcd_decimals,
-      lcdColor:                 sk(ss.LcdColor,        this._config.lcd_color,       ss.LcdColor?.STANDARD),
-      digitalFont:              this._config.digital_font,
-      // Schwellwert
-      thresholdVisible:         this._config.threshold !== null,
-      threshold:                this._config.threshold !== null ? this._config.threshold : this._config.max,
-      thresholdRising:          this._config.threshold_rising,
-      // Messwert-Marker
-      minMeasuredValueVisible:  this._config.min_measured_visible,
-      maxMeasuredValueVisible:  this._config.max_measured_visible,
-      // Animation
-      fullScaleDeflectionTime:  this._config.animation_speed,
-      // Sections
-      section:                  mkSections(this._config.sections),
-      useSectionColors:         hasSections,
-      // Aussehen
-      frameDesign:              sk(ss.FrameDesign,      this._config.frame_design,     ss.FrameDesign?.METAL),
-      backgroundColor:          sk(ss.BackgroundColor,  this._config.background_color, ss.BackgroundColor?.DARK_GRAY),
-      foregroundType:           sk(ss.ForegroundType,   this._config.foreground_type,  ss.ForegroundType?.TYPE1),
-      ledColor:                 sk(ss.LedColor,         this._config.led_color,        ss.LedColor?.RED_LED),
-    };
-
-    // Zeiger (nur Radial)
-    if (!isLinear) {
-      params.pointerType  = sk(ss.PointerType, this._config.pointer_type,  ss.PointerType?.TYPE1);
-      params.pointerColor = sk(ss.ColorDef,    this._config.pointer_color,  ss.ColorDef?.RED);
-      params.knobType     = sk(ss.KnobType,    this._config.knob_type,      ss.KnobType?.STANDARD_KNOB);
-      params.knobStyle    = sk(ss.KnobStyle,   this._config.knob_style,     ss.KnobStyle?.SILVER);
-    }
-    // Balkenfarbe (nur Linear)
-    if (isLinear) {
-      params.valueColor   = sk(ss.ColorDef,    this._config.value_color,    ss.ColorDef?.RED);
-    }
-
-    // undefined entfernen
-    Object.keys(params).forEach(k => params[k] === undefined && delete params[k]);
+    const isClock   = this._config.gauge_type === "clock";
+    const isLinear  = this._config.gauge_type === "linear" || this._config.gauge_type === "linear_bargraph";
 
     try {
+      if (isClock) {
+        const offsetH = Math.trunc(this._config.timezone_offset);
+        const offsetM = Math.round((Math.abs(this._config.timezone_offset) % 1) * 60) * Math.sign(this._config.timezone_offset || 1);
+        this._gauge = new ss.Clock(canvas, {
+          frameDesign:         sk(ss.FrameDesign,     this._config.frame_design,    ss.FrameDesign?.METAL),
+          backgroundColor:     sk(ss.BackgroundColor, this._config.background_color,ss.BackgroundColor?.DARK_GRAY),
+          foregroundType:      sk(ss.ForegroundType,  this._config.foreground_type, ss.ForegroundType?.TYPE1),
+          pointerType:         sk(ss.PointerType,     this._config.pointer_type,    ss.PointerType?.TYPE1),
+          pointerColor:        sk(ss.ColorDef,        this._config.pointer_color,   ss.ColorDef?.RED),
+          timeZoneOffsetHour:  offsetH,
+          timeZoneOffsetMinute:offsetM,
+        });
+        this._gauge.startClock();
+        return;
+      }
+
+      const hasSections = this._config.sections.length > 0;
+      const params = {
+        minValue:                this._config.min,
+        maxValue:                this._config.max,
+        titleString:             this._config.title,
+        unitString:              this._config.unit,
+        lcdVisible:              this._config.show_lcd,
+        lcdDecimals:             this._config.lcd_decimals,
+        lcdColor:                sk(ss.LcdColor,       this._config.lcd_color,      ss.LcdColor?.STANDARD),
+        digitalFont:             this._config.digital_font,
+        thresholdVisible:        this._config.threshold !== null,
+        threshold:               this._config.threshold !== null ? this._config.threshold : this._config.max,
+        thresholdRising:         this._config.threshold_rising,
+        minMeasuredValueVisible: this._config.min_measured_visible,
+        maxMeasuredValueVisible: this._config.max_measured_visible,
+        fullScaleDeflectionTime: this._config.animation_speed,
+        section:                 mkSections(this._config.sections),
+        useSectionColors:        hasSections,
+        frameDesign:             sk(ss.FrameDesign,     this._config.frame_design,    ss.FrameDesign?.METAL),
+        backgroundColor:         sk(ss.BackgroundColor, this._config.background_color,ss.BackgroundColor?.DARK_GRAY),
+        foregroundType:          sk(ss.ForegroundType,  this._config.foreground_type, ss.ForegroundType?.TYPE1),
+        ledColor:                sk(ss.LedColor,        this._config.led_color,       ss.LedColor?.RED_LED),
+      };
+
+      if (!isLinear) {
+        params.pointerType  = sk(ss.PointerType, this._config.pointer_type,  ss.PointerType?.TYPE1);
+        params.pointerColor = sk(ss.ColorDef,    this._config.pointer_color,  ss.ColorDef?.RED);
+        params.knobType     = sk(ss.KnobType,    this._config.knob_type,      ss.KnobType?.STANDARD_KNOB);
+        params.knobStyle    = sk(ss.KnobStyle,   this._config.knob_style,     ss.KnobStyle?.SILVER);
+      }
+      if (isLinear) {
+        params.valueColor   = sk(ss.ColorDef,    this._config.value_color,    ss.ColorDef?.RED);
+      }
+
+      Object.keys(params).forEach(k => params[k] === undefined && delete params[k]);
+
       switch (this._config.gauge_type) {
         case "linear_bargraph": this._gauge = new ss.LinearBargraph(canvas, params); break;
         case "linear":          this._gauge = new ss.Linear(canvas, params);         break;
@@ -230,12 +222,10 @@ class SteelSeriesGaugeCard extends HTMLElement {
       return;
     }
 
-    // Neuesten bekannten Wert verwenden (race condition: set hass kam während async load)
     const v = this._latestValue ?? initialValue;
     this._gauge.setValue(v);
     if (this._minMeasured === null || v < this._minMeasured) this._minMeasured = v;
     if (this._maxMeasured === null || v > this._maxMeasured) this._maxMeasured = v;
-    // Gesicherte Min/Max-History wiederherstellen
     if (this._config.min_measured_visible && this._minMeasured !== null)
       this._gauge.setMinMeasuredValue?.(this._minMeasured);
     if (this._config.max_measured_visible && this._maxMeasured !== null)
@@ -261,7 +251,9 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
     if (!this._config) return;
     const c = this._config;
     const sections = Array.isArray(c.sections) ? c.sections : [];
-    const isLinear = (c.gauge_type || "radial").startsWith("linear");
+    const gaugeType = c.gauge_type || "radial";
+    const isLinear  = gaugeType.startsWith("linear");
+    const isClock   = gaugeType === "clock";
 
     this.innerHTML = `
       <style>
@@ -287,16 +279,24 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
 
         <div class="full"><label>Entity *</label>
           <input id="entity" value="${c.entity||""}" placeholder="sensor.mein_sensor"/></div>
-        <div class="full"><label>Titel (wird als Gauge-Beschriftung angezeigt)</label>
-          <input id="title" value="${c.title||""}"/></div>
 
         <h4>Gauge-Typ</h4>
         <div class="full"><select id="gauge_type">
-          <option value="radial"           ${(c.gauge_type||"radial")==="radial"?"selected":""}>Radial</option>
-          <option value="radial_bargraph"  ${c.gauge_type==="radial_bargraph"?"selected":""}>Radial Bargraph</option>
-          <option value="linear"           ${c.gauge_type==="linear"?"selected":""}>Linear</option>
-          <option value="linear_bargraph"  ${c.gauge_type==="linear_bargraph"?"selected":""}>Linear Bargraph</option>
+          <option value="radial"          ${gaugeType==="radial"?"selected":""}>Radial</option>
+          <option value="radial_bargraph" ${gaugeType==="radial_bargraph"?"selected":""}>Radial Bargraph</option>
+          <option value="linear"          ${gaugeType==="linear"?"selected":""}>Linear</option>
+          <option value="linear_bargraph" ${gaugeType==="linear_bargraph"?"selected":""}>Linear Bargraph</option>
+          <option value="clock"           ${gaugeType==="clock"?"selected":""}>Uhr (Clock)</option>
         </select></div>
+
+        ${isClock ? `
+        <h4>Uhr-Einstellungen</h4>
+        <div><label>Zeitzonenversatz (Stunden, z.B. 2 oder -5)</label>
+          <input id="timezone_offset" type="number" step="0.5" value="${c.timezone_offset||0}"/></div>
+        <div></div>
+        ` : `
+        <div class="full"><label>Titel (wird als Gauge-Beschriftung angezeigt)</label>
+          <input id="title" value="${c.title||""}"/></div>
 
         <h4>Skala</h4>
         <div><label>Min</label><input id="min" type="number" value="${c.min!==undefined?c.min:0}"/></div>
@@ -304,11 +304,13 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
         <div><label>Einheit</label><input id="unit" value="${c.unit||""}"/></div>
         <div><label>Animationsgeschwindigkeit (s)</label>
           <input id="animation_speed" type="number" step="0.5" min="0.5" value="${c.animation_speed||2.5}"/></div>
+        `}
 
         <h4>Größe</h4>
         <div><label>Breite (px)</label><input id="width"  type="number" value="${c.width||c.size||220}"/></div>
         <div><label>Höhe (px)</label> <input id="height" type="number" value="${c.height||c.size||220}"/></div>
 
+        ${!isClock ? `
         <h4>Schwellwert</h4>
         <div><label>Wert</label><input id="threshold" type="number" value="${c.threshold!=null?c.threshold:""}"/></div>
         <div><label>Richtung</label><select id="threshold_rising">
@@ -339,6 +341,7 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
           <option value="false" ${!c.max_measured_visible?"selected":""}>Nein</option>
           <option value="true"  ${c.max_measured_visible?"selected":""}>Ja</option>
         </select></div>
+        ` : ""}
 
         <h4>Rahmen &amp; Hintergrund</h4>
         <div><label>Rahmen</label><select id="frame_design">
@@ -355,21 +358,24 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
           ${["TYPE1","TYPE2","TYPE3","TYPE4","TYPE5"]
             .map(v=>`<option value="${v}" ${(c.foreground_type||"TYPE1")===v?"selected":""}>${v}</option>`).join("")}
         </select></div>
+        ${!isClock ? `
         <div><label>LED-Farbe</label><select id="led_color">
           ${["RED_LED","GREEN_LED","BLUE_LED","ORANGE_LED","YELLOW_LED","CYAN_LED","MAGENTA_LED"]
             .map(v=>`<option value="${v}" ${(c.led_color||"RED_LED")===v?"selected":""}>${v}</option>`).join("")}
         </select></div>
+        ` : "<div></div>"}
 
         ${!isLinear ? `
-        <h4>Zeiger (nur Radial)</h4>
+        <h4>Zeiger</h4>
         <div><label>Zeiger-Typ</label><select id="pointer_type">
-          ${["TYPE1","TYPE2","TYPE8"]
+          ${["TYPE1","TYPE2","TYPE3","TYPE4","TYPE5","TYPE6","TYPE7","TYPE8","TYPE9"]
             .map(v=>`<option value="${v}" ${(c.pointer_type||"TYPE1")===v?"selected":""}>${v}</option>`).join("")}
         </select></div>
         <div><label>Zeiger-Farbe</label><select id="pointer_color">
           ${["RED","GREEN","BLUE","ORANGE","YELLOW","CYAN","MAGENTA","WHITE","GRAY","BLACK"]
             .map(v=>`<option value="${v}" ${(c.pointer_color||"RED")===v?"selected":""}>${v}</option>`).join("")}
         </select></div>
+        ${!isClock ? `
         <div><label>Knopf-Typ</label><select id="knob_type">
           ${["STANDARD_KNOB","METAL_KNOB"]
             .map(v=>`<option value="${v}" ${(c.knob_type||"STANDARD_KNOB")===v?"selected":""}>${v}</option>`).join("")}
@@ -378,8 +384,9 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
           ${["SILVER","BLACK"]
             .map(v=>`<option value="${v}" ${(c.knob_style||"SILVER")===v?"selected":""}>${v}</option>`).join("")}
         </select></div>
+        ` : "<div></div><div></div>"}
         ` : `
-        <h4>Balken-Farbe (nur Linear)</h4>
+        <h4>Balken-Farbe</h4>
         <div><label>Wert-Farbe</label><select id="value_color">
           ${["RED","GREEN","BLUE","ORANGE","YELLOW","CYAN","MAGENTA","WHITE","GRAY","BLACK"]
             .map(v=>`<option value="${v}" ${(c.value_color||"RED")===v?"selected":""}>${v}</option>`).join("")}
@@ -387,6 +394,7 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
         <div></div>
         `}
 
+        ${!isClock ? `
         <h4>Farbbereiche (Sections)</h4>
         <div class="hint">Abschnitte werden farbig auf dem Gauge markiert</div>
         ${sections.map((s, i) => `
@@ -397,13 +405,15 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
             <div><label>&nbsp;</label><button class="btn-del" data-del="${i}">✕</button></div>
           </div>`).join("")}
         <button class="btn-add full" id="add-section">+ Bereich hinzufügen</button>
+        ` : ""}
 
       </div>`;
 
     const ids = ["entity","title","gauge_type","unit","min","max","width","height",
                  "threshold","threshold_rising","show_lcd","lcd_color","lcd_decimals",
                  "digital_font","min_measured_visible","max_measured_visible",
-                 "animation_speed","frame_design","background_color","foreground_type","led_color"];
+                 "animation_speed","frame_design","background_color","foreground_type","led_color",
+                 "timezone_offset"];
     const optionalIds = ["pointer_type","pointer_color","knob_type","knob_style","value_color"];
     [...ids, ...optionalIds].forEach(id => {
       const el = this.querySelector(`#${id}`);
@@ -419,7 +429,8 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
         this._render(); this._dispatch();
       }));
 
-    this.querySelector("#add-section").addEventListener("click", () => {
+    const addBtn = this.querySelector("#add-section");
+    if (addBtn) addBtn.addEventListener("click", () => {
       const min = this._config.min || 0, max = this._config.max || 100;
       const existing = this._config.sections;
       const lastStop = existing.length ? existing[existing.length-1].stop : min;
@@ -427,7 +438,6 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
       this._render(); this._dispatch();
     });
 
-    // gauge_type-Wechsel → neu rendern (Linear/Radial-spezifische Felder)
     const gtEl = this.querySelector("#gauge_type");
     if (gtEl) gtEl.addEventListener("change", () => { this._changed(); this._render(); });
   }
@@ -452,19 +462,19 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
       title:                v("title"),
       gauge_type:           v("gauge_type","radial"),
       unit:                 v("unit"),
-      min:                  parseFloat(v("min","0"))             || 0,
-      max:                  parseFloat(v("max","100"))           || 100,
-      width:                parseInt(v("width","220"))           || 220,
-      height:               parseInt(v("height","220"))          || 220,
+      min:                  parseFloat(v("min","0"))              || 0,
+      max:                  parseFloat(v("max","100"))            || 100,
+      width:                parseInt(v("width","220"))            || 220,
+      height:               parseInt(v("height","220"))           || 220,
       threshold:            thr !== "" ? parseFloat(thr) : null,
-      threshold_rising:     v("threshold_rising","true") === "true",
-      show_lcd:             v("show_lcd","true") === "true",
+      threshold_rising:     v("threshold_rising","true")         === "true",
+      show_lcd:             v("show_lcd","true")                 === "true",
       lcd_color:            v("lcd_color","STANDARD"),
-      lcd_decimals:         parseInt(v("lcd_decimals","1"))      || 1,
-      digital_font:         v("digital_font","false") === "true",
-      min_measured_visible: v("min_measured_visible","false") === "true",
-      max_measured_visible: v("max_measured_visible","false") === "true",
-      animation_speed:      parseFloat(v("animation_speed","2.5")) || 2.5,
+      lcd_decimals:         parseInt(v("lcd_decimals","1"))       || 1,
+      digital_font:         v("digital_font","false")            === "true",
+      min_measured_visible: v("min_measured_visible","false")    === "true",
+      max_measured_visible: v("max_measured_visible","false")    === "true",
+      animation_speed:      parseFloat(v("animation_speed","2.5"))|| 2.5,
       frame_design:         v("frame_design","METAL"),
       background_color:     v("background_color","DARK_GRAY"),
       foreground_type:      v("foreground_type","TYPE1"),
@@ -474,6 +484,7 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
       knob_type:            v("knob_type","STANDARD_KNOB"),
       knob_style:           v("knob_style","SILVER"),
       value_color:          v("value_color","RED"),
+      timezone_offset:      parseFloat(v("timezone_offset","0")) || 0,
       sections,
     };
     this._dispatch();
@@ -506,7 +517,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type:        "steelseries-gauge-card",
   name:        "SteelSeries Gauge Card",
-  description: "Animierte SteelSeries-Gauges (Radial, Linear, Bargraph) mit vollem Konfigurations-Editor",
+  description: "Animierte SteelSeries-Gauges (Radial, Linear, Bargraph, Uhr) mit vollem Konfigurations-Editor",
   preview:     false,
   editor:      "steelseries-gauge-card-editor",
 });

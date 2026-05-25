@@ -137,25 +137,30 @@ cp steelseries-gauge-card.js dist/steelseries-gauge-card.js
 # Änderung machen
 vim steelseries-gauge-card.js
 
-# dist/ synchronisieren
-cp steelseries-gauge-card.js dist/steelseries-gauge-card.js
+# dist/ neu bauen (steelseries.min.js + Card gebündelt)
+./build.sh
 
 # Committen und pushen (Mirror synchronisiert GitHub automatisch)
 git add steelseries-gauge-card.js dist/steelseries-gauge-card.js
 git commit -m "feat/fix: beschreibung"
-git push origin master
+git push https://ppfeiffer:TOKEN@git.pfeiffer-privat.de/ppfeiffer/steelseries-gauge-addon.git master
 ```
+
+**Wichtig:** `dist/steelseries.min.js` wird NICHT committet (ist zu groß).  
+`dist/steelseries-gauge-card.js` = gebündeltes Artefakt (steelseries + Card), wird committet.
 
 ---
 
 ## Offene Punkte / Ideen
 
-- [ ] Weitere Pointer-Typen testen (TYPE3–TYPE7 existieren in der Lib)
+- [x] Weitere Pointer-Typen (TYPE1–TYPE9 alle freigeschaltet)
+- [x] `Clock`-Gauge mit Timezone-Offset
+- [x] Offline-Modus: steelseries.min.js in dist/ gebündelt via build.sh
+- [x] HA Addon Installer: Version-Check + GitHub Update-Notification
 - [ ] `RadialVertical` Gauge-Typ hinzufügen
 - [ ] `Compass`-Gauge als weiterer Typ
-- [ ] `Clock`-Gauge als weiterer Typ
-- [ ] Offline-Modus: steelseries.min.js lokal in dist/ bündeln (kein CDN)
-- [ ] HA Addon Installer: Version-Check (nur neu kopieren wenn Version neuer)
+- [ ] `areas`-Parameter implementieren (dokumentiert aber nicht gebaut)
+- [ ] `attribute`-Feld im visuellen Editor ergänzen
 - [ ] Mehrere Entities auf einem Gauge (Dual-Pointer)
 
 ---
