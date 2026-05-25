@@ -43,6 +43,9 @@ class SteelSeriesGaugeCard extends HTMLElement {
     this._gauge = null;
     this._config = {};
     this._initialized = false;
+    this._latestValue = null;
+    this._minMeasured = null;
+    this._maxMeasured = null;
   }
 
   static getConfigElement() {
@@ -94,6 +97,19 @@ class SteelSeriesGaugeCard extends HTMLElement {
       lcd_color:                config.lcd_color               || "STANDARD",
     };
     if (this._initialized && old !== JSON.stringify(this._config)) {
+      const oldParsed = JSON.parse(old);
+      // Min/Max-Historie nur bei Entitätswechsel zurücksetzen
+      if (oldParsed.entity !== this._config.entity || oldParsed.attribute !== this._config.attribute) {
+        this._minMeasured = null;
+        this._maxMeasured = null;
+        this._latestValue = null;
+      } else if (this._gauge) {
+        // Aktuelle Messwerte aus der Library sichern bevor der Gauge zerstört wird
+        try {
+          this._minMeasured = this._gauge.getMinMeasuredValue?.() ?? this._minMeasured;
+          this._maxMeasured = this._gauge.getMaxMeasuredValue?.() ?? this._maxMeasured;
+        } catch (_) {}
+      }
       this._initialized = false;
       this._gauge = null;
       if (this._hass) this.hass = this._hass;
@@ -109,10 +125,13 @@ class SteelSeriesGaugeCard extends HTMLElement {
       : stateObj.state;
     const value = parseFloat(raw);
     if (isNaN(value)) return;
+    this._latestValue = value;
     if (!this._initialized) {
       this._build(value);
     } else if (this._gauge) {
       this._gauge.setValueAnimated(value);
+      if (this._minMeasured === null || value < this._minMeasured) this._minMeasured = value;
+      if (this._maxMeasured === null || value > this._maxMeasured) this._maxMeasured = value;
     }
   }
 
@@ -121,15 +140,13 @@ class SteelSeriesGaugeCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-        ha-card { display:flex; flex-direction:column; align-items:center; padding:12px 8px 16px; }
-        .title { font-size:14px; font-weight:500; color:var(--primary-text-color); margin-bottom:6px; text-align:center; }
+        ha-card { display:flex; flex-direction:column; align-items:center; padding:4px; }
         .gauge-wrapper { display:flex; flex-direction:column; align-items:center; }
         canvas { display:block; }
         .msg { font-size:13px; padding:20px; color:var(--secondary-text-color); }
         .err { color:var(--error-color,red); }
       </style>
       <ha-card>
-        ${this._config.title ? `<div class="title">${this._config.title}</div>` : ""}
         <div class="gauge-wrapper"><span class="msg">⏳ Lade SteelSeries…</span></div>
       </ha-card>`;
 
@@ -213,7 +230,16 @@ class SteelSeriesGaugeCard extends HTMLElement {
       return;
     }
 
-    this._gauge.setValue(initialValue);
+    // Neuesten bekannten Wert verwenden (race condition: set hass kam während async load)
+    const v = this._latestValue ?? initialValue;
+    this._gauge.setValue(v);
+    if (this._minMeasured === null || v < this._minMeasured) this._minMeasured = v;
+    if (this._maxMeasured === null || v > this._maxMeasured) this._maxMeasured = v;
+    // Gesicherte Min/Max-History wiederherstellen
+    if (this._config.min_measured_visible && this._minMeasured !== null)
+      this._gauge.setMinMeasuredValue?.(this._minMeasured);
+    if (this._config.max_measured_visible && this._maxMeasured !== null)
+      this._gauge.setMaxMeasuredValue?.(this._maxMeasured);
   }
 
   _err(msg) {
@@ -261,7 +287,7 @@ class SteelSeriesGaugeCardEditor extends HTMLElement {
 
         <div class="full"><label>Entity *</label>
           <input id="entity" value="${c.entity||""}" placeholder="sensor.mein_sensor"/></div>
-        <div class="full"><label>Titel (wird auch als Gauge-Beschriftung verwendet)</label>
+        <div class="full"><label>Titel (wird als Gauge-Beschriftung angezeigt)</label>
           <input id="title" value="${c.title||""}"/></div>
 
         <h4>Gauge-Typ</h4>

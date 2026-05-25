@@ -14,11 +14,28 @@ log_info()    { echo -e "${GREEN}[INFO]${NC}  $*"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $*"; }
 
+print_manual_instructions() {
+    log_warn "──────────────────────────────────────────────────"
+    log_warn " Manuelle Installation erforderlich:"
+    log_warn "  Einstellungen → Dashboards → ⋮ → Ressourcen"
+    log_warn "  URL:  $CARD_URL"
+    log_warn "  Typ:  JavaScript-Modul"
+    log_warn "──────────────────────────────────────────────────"
+}
+
+# Extrahiert "X.Y.Z" aus dem ersten Vorkommen von "vX.Y.Z" in einer Datei
+extract_version() {
+    grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' "$1" 2>/dev/null | head -1 | tr -d 'v' || echo "0.0.0"
+}
+
+# Gibt zurück ob $1 >= $2 (semantisch)
+version_gte() {
+    [ "$(printf '%s\n' "$1" "$2" | sort -V | head -1)" = "$2" ]
+}
+
 # ── Konfiguration lesen ──────────────────────────────────────────────────────
 CONFIG_PATH="/data/options.json"
 
-# Supervisor stellt HASSIO_TOKEN automatisch bereit
-# Falls der Nutzer einen eigenen Token angegeben hat, wird dieser bevorzugt
 USER_TOKEN="$(jq -r '.token // ""' "$CONFIG_PATH")"
 HA_URL="$(jq -r '.ha_url // "http://supervisor/core"' "$CONFIG_PATH")"
 
@@ -49,10 +66,28 @@ if [[ ! -d /config/www ]]; then
     mkdir -p /config/www
 fi
 
-# ── 2. Card-Datei kopieren ───────────────────────────────────────────────────
-log_info "Kopiere steelseries-gauge-card.js nach /config/www/ …"
-cp "$CARD_SRC" "$CARD_DST"
-log_info "Datei erfolgreich kopiert: $CARD_DST"
+# ── 2. Version prüfen und Card-Datei ggf. kopieren ──────────────────────────
+SRC_VER="$(extract_version "$CARD_SRC")"
+log_info "Addon-Version: v${SRC_VER}"
+
+if [[ -f "$CARD_DST" ]]; then
+    DST_VER="$(extract_version "$CARD_DST")"
+    log_info "Installierte Version: v${DST_VER}"
+    if version_gte "$DST_VER" "$SRC_VER"; then
+        log_info "Bereits aktuell (v${DST_VER}) – Datei wird nicht überschrieben."
+        COPIED=false
+    else
+        log_info "Update von v${DST_VER} auf v${SRC_VER} …"
+        cp "$CARD_SRC" "$CARD_DST"
+        log_info "Datei aktualisiert: $CARD_DST"
+        COPIED=true
+    fi
+else
+    log_info "Erstinstallation – kopiere steelseries-gauge-card.js …"
+    cp "$CARD_SRC" "$CARD_DST"
+    log_info "Datei kopiert: $CARD_DST"
+    COPIED=true
+fi
 
 # ── 3. Bestehende Ressourcen abrufen ─────────────────────────────────────────
 log_info "Prüfe vorhandene Lovelace-Ressourcen via HA API …"
@@ -100,24 +135,44 @@ else
     fi
 fi
 
-# ── 6. Abschluss ─────────────────────────────────────────────────────────────
+# ── 6. Update-Check ──────────────────────────────────────────────────────────
+REMOTE_CONFIG_URL="https://raw.githubusercontent.com/ppfeiffer63/steelseries-gauge-card/master/config.json"
+log_info "Prüfe auf neue Version (GitHub) …"
+
+REMOTE_CONFIG=$(curl -sf --max-time 10 "$REMOTE_CONFIG_URL" 2>/dev/null || true)
+
+if [[ -n "$REMOTE_CONFIG" ]]; then
+    REMOTE_VER=$(echo "$REMOTE_CONFIG" | jq -r '.version // empty')
+    if [[ -n "$REMOTE_VER" ]] && ! version_gte "$SRC_VER" "$REMOTE_VER"; then
+        log_info "Update verfügbar: v${REMOTE_VER} (installiert: v${SRC_VER})"
+        curl -sf -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"title\":\"SteelSeries Gauge Card: Update verfügbar\",\"message\":\"Version **v${REMOTE_VER}** ist verfügbar (installiert: v${SRC_VER}).\\nBitte das Addon in den HA Einstellungen → Addons aktualisieren.\",\"notification_id\":\"steelseries_gauge_update\"}" \
+            "${HA_URL}/api/services/persistent_notification/create" 2>/dev/null || \
+            log_warn "Konnte Update-Benachrichtigung nicht erstellen."
+    else
+        log_info "Bereits aktuelle Version (v${SRC_VER})."
+        # Alte Benachrichtigung entfernen falls vorhanden
+        curl -sf -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"notification_id\":\"steelseries_gauge_update\"}" \
+            "${HA_URL}/api/services/persistent_notification/dismiss" 2>/dev/null || true
+    fi
+else
+    log_warn "Update-Check: GitHub nicht erreichbar – wird übersprungen."
+fi
+
+# ── 7. Abschluss ─────────────────────────────────────────────────────────────
 log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 log_info " Installation abgeschlossen!"
-log_info " Card-Datei: $CARD_DST"
+log_info " Card-Datei: $CARD_DST (v${SRC_VER})"
 log_info " Ressource:  $CARD_URL ($RESOURCE_TYPE)"
-log_info ""
-log_info " Bitte den Browser-Cache leeren (Shift+F5) und"
-log_info " Home Assistant neu laden."
+if [[ "$COPIED" == "true" ]]; then
+    log_info ""
+    log_info " Browser-Cache leeren (Shift+F5) und HA neu laden!"
+fi
 log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 exit 0
-
-# ── Hilfsfunktion: manuelle Anleitung ────────────────────────────────────────
-print_manual_instructions() {
-    log_warn "──────────────────────────────────────────────────"
-    log_warn " Manuelle Installation erforderlich:"
-    log_warn "  Einstellungen → Dashboards → ⋮ → Ressourcen"
-    log_warn "  URL:  $CARD_URL"
-    log_warn "  Typ:  JavaScript-Modul"
-    log_warn "──────────────────────────────────────────────────"
-}
